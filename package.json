@@ -15,8 +15,10 @@
     "@ryanbekhen/cryptkhen": "^3.2.0",
     "amqplib": "^0.10.3",
     "dirname-filename-esm": "^1.1.1",
+    "drizzle-orm": "^0.27.2",
     "fastify": "^4.19.2",
     "hono": "^3.3.0",
+    "postgres": "^3.3.5",
     "uuid": "^9.0.0",
     "ws": "^8.13.0",
     "zod": "^3.21.4"
@@ -26,6 +28,7 @@
     "@types/node": "^20.4.2",
     "@types/uuid": "^9.0.2",
     "@types/ws": "^8.5.5",
+    "drizzle-kit": "^0.19.5",
     "typescript": "^5.1.6"
   }
 }

@@ -1,4 +1,4 @@
-const apiKeys: string[] = [
+export const apiKeys: string[] = [
     "oif89sdwekljnjvdfgß0fdgpoijiqwebh" //Smashed Keyboard lol
 ]
 

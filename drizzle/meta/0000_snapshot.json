@@ -1,0 +1,113 @@
+{
+  "version": "5",
+  "dialect": "pg",
+  "id": "66368667-684d-4342-87af-5a4ba1549ed7",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "loopkeys": {
+      "name": "loopkeys",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "loopkey": {
+          "name": "loopkey",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "discordid": {
+          "name": "discordid",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ips": {
+          "name": "ips",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modules": {
+          "name": "modules",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "username": {
+          "name": "username",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "discordid": {
+          "name": "discordid",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shopkeys": {
+          "name": "shopkeys",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "loopkeys": {
+          "name": "loopkeys",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maxloopkeys": {
+          "name": "maxloopkeys",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "matchmakerkeys": {
+          "name": "matchmakerkeys",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "password": {
+          "name": "password",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  }
+}

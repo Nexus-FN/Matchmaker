@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { AES256Encryption, RSAEncryption } from '@ryanbekhen/cryptkhen';
 import { channel } from "./utilities/rabbitmq.js";
-import { ServerStatus, serverArray } from './routes/server.js';
+import { Server, ServerStatus, serverArray } from './routes/server.js';
 
 type Client = {
     accountId: string,
@@ -104,44 +104,74 @@ class Matchmaker {
                 const message = JSON.parse(msg.content.toString())
                 switch (message.action) {
                     case 'UPDATE':
-                        console.log(`${message.data.clientAmount} clients in queue for ${message.data.playlist} in ${message.data.region} with custom key ${message.data.customkey}`)
-                        await Queued(message.data.playlist, message.data.region, message.data.customkey)
+                        console.log(`${message.data.clientAmount} clients in queue for ${message.data.playlist} in ${message.data.region} with custom key ${message.data.customkey}`);
+
+                        await Queued(message.data.playlist, message.data.region, message.data.customkey);
+
                         const server = serverArray.find(server => server.region === message.data.region && server.playlist === message.data.playlist && (server.customkey === message.data.customkey || server.customkey === "none") && server.status === ServerStatus.ONLINE);
                         const customkey = server ? message.data.customkey : "none";
-                        if (!server) return console.log("No servers available");
 
-                        console.log(`Found server ${server.serverId} for ${message.data.playlist} in ${message.data.region} with custom key ${customkey}`)
+                        if (!server) {
+                            return console.log("No servers available");
+                        }
+                        if (message.data.type == "CLOSE") return;
 
-                        const msg = {
-                            action: 'STATUS',
-                            data: {
-                                status: 'online',
-                                playlist: message.data.playlist,
-                                region: message.data.region,
-                                customkey: customkey,
-                                serverid: server.serverId,
-                            },
-                        };
-                        channel.sendToQueue('matchmaker', Buffer.from(JSON.stringify(msg)));
-                        break
+                        const sortedClients = Array.from(clients.values())
+                            .filter(value => value.playlist === server.playlist
+                                && value.region === server.region
+                                && value.customkey === server.customkey
+                                && value.preventmessage === false)
+                            .sort((a, b) => a.joinTime - b.joinTime)
+                            .slice(0, server.maxPlayers);
+
+                        console.log(`Found server ${server.serverId} for ${message.data.playlist} in ${message.data.region} with custom key ${customkey}`);
+
+                        SessionAssignment(sortedClients, server);
+
+                        setTimeout(async () => {
+                            Join(sortedClients, server);
+                        }, 200);
+
+                        break;
+
                     case 'STATUS':
-                        console.log("Received status update")
+                        console.log("Received status update");
+
                         try {
-                            if (message.data.status !== 'online') return
+                            if (message.data.status !== 'online') {
+                                return;
+                            }
+
                             const data = message.data;
+
+                            const sortedClients = Array.from(clients.values())
+                                .filter(value => value.playlist === data.playlist
+                                    && value.region === data.region
+                                    && value.customkey === data.customkey
+                                    && value.preventmessage === false)
+                                .sort((a, b) => a.joinTime - b.joinTime);
+
+                            const serverarg = serverArray.find(server => server.region === data.region && server.playlist === data.playlist && (server.customkey === data.customkey || server.customkey === "none") && server.status === ServerStatus.ONLINE);
+                            if (!serverarg) {
+                                return console.log("No servers available");
+                            }
+
                             setTimeout(async () => {
-                                SessionAssignment(data.playlist, data.region, data.customkey)
+                                SessionAssignment(sortedClients, serverarg);
+
                                 setTimeout(async () => {
-                                    Join(data.playlist, data.region, data.customkey, data.serverid)
+                                    Join(sortedClients, serverarg);
                                 }, 200);
                             }, 100);
-                            break
+
+                            break;
                         } catch (err) {
                             //console.log(err)
                         }
+
                     default:
                         //console.log("Unknown action")
-                        break
+                        break;
                 }
                 //console.log(message)
                 channel.ack(msg)
@@ -158,6 +188,7 @@ class Matchmaker {
                     region: region,
                     playlist: playlist,
                     customkey: customkey,
+                    type: 'CLOSE'
                 },
             }
             channel.sendToQueue('matchmaker', Buffer.from(JSON.stringify(msg)))
@@ -175,6 +206,7 @@ class Matchmaker {
                     region: regionarg,
                     playlist: playlist,
                     customkey: customkeyarg,
+                    type: 'NEW'
                 },
             };
 
@@ -211,7 +243,7 @@ class Matchmaker {
                 JSON.stringify({
                     payload: {
                         totalPlayers: players,
-                        connectedPlayers: players,
+                        connectedPlayers: sortedClients.length,
                         state: "Waiting",
                     },
                     name: "StatusUpdate",
@@ -229,6 +261,7 @@ class Matchmaker {
                 .sort((a, b) => a.joinTime - b.joinTime);
 
             for (const client of sortedClients) {
+                if(client.preventmessage === true) continue;
                 (client.socket as WebSocket).send(
                     JSON.stringify({
                         payload: {
@@ -244,20 +277,16 @@ class Matchmaker {
             }
         }
 
-        async function SessionAssignment(playlist: string, regionarg: string, customkeyarg: string) {
-            const maxPlayers = 100;
-
-            // Sort clients by join time
-            const sortedClients = Array.from(clients.values())
-                .filter(value => value.playlist === playlist
-                    && value.region === regionarg
-                    && value.customkey === customkeyarg)
-                .sort((a, b) => a.joinTime - b.joinTime)
-                .slice(0, maxPlayers)
-
-                console.log(sortedClients);
+        async function SessionAssignment(sortedClients: any, serverarg: Server) {
 
             for (const [index, client] of sortedClients.entries()) {
+                const serverfound = serverArray.find(server => server.serverId === serverarg.serverId);
+                if (!serverfound) return console.log("Server not found");
+                if (serverfound.players >= serverfound.maxPlayers) return console.log("Server is full");
+                if (index >= serverarg.maxPlayers) {
+                    console.log(`Index is higher than maxPlayers for ${client.accountId}`);
+                    break;
+                }
                 console.log(`Assigning session to ${client.accountId} because their position is ${index}`);
 
                 (client.socket as WebSocket).send(
@@ -272,23 +301,23 @@ class Matchmaker {
             }
         }
 
-        async function Join(playlist: string, regionarg: string, customkeyarg: string, serveridarg: string) {
-            const maxPlayers = 100;
+        async function Join(sortedClients: any, serverarg: Server) {
+            const server = serverArray.find(server => server.serverId === serverarg.serverId);
+            if (!server) {
+                return console.log("Server not found");
+            }
 
-            // Sort clients by join time
-            const sortedClients = Array.from(clients.values())
-                .filter(value => value.playlist === playlist
-                    && value.region === regionarg
-                    && value.customkey === customkeyarg)
-                .sort((a, b) => a.joinTime - b.joinTime)
-                .slice(0, maxPlayers);
+            const maxPlayers = Math.min(server.maxPlayers, sortedClients.length);
+            const clientsToJoin = sortedClients.slice(0, maxPlayers);
 
-            console.log(sortedClients);
+            for (const [index, client] of clientsToJoin.entries()) {
+                if (server.players >= server.maxPlayers) {
+                    console.log("Server is full");
+                    break;
+                }
 
-            for (const [index, client] of sortedClients.entries()) {
-                console.log(client);
                 console.log(`Sending join to ${client.accountId} because their position is ${index}`);
-
+                client.preventmessage = true;
                 (client.socket as WebSocket).send(
                     JSON.stringify({
                         payload: {
@@ -299,11 +328,8 @@ class Matchmaker {
                         name: "Play",
                     })
                 );
-                sortedClients.splice(index, 1);
-                let server = serverArray.find(server => server.serverId === serveridarg);
-                if (server) {
-                    server.players = server.players + 1;
-                }
+
+                server.players++;
             }
         }
     }

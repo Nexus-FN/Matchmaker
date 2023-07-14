@@ -14,7 +14,7 @@ export enum ServerRegion {
     OCE = "OCE",
 }
 
-interface Server {
+export interface Server {
     serverId: string
     region: string
     playlist: string
@@ -47,20 +47,6 @@ export const serverArray: Server[] = [
 
 function serverRoutes(app: Hono) {
 
-    app.use('/api/v1/server/*', async (c: Context, next) => {
-
-        const apiKey = c.req.header("x-api-key")
-        if (!apiKey) return c.json({
-            error: "api key missing"
-        }, 400)
-        if (!verifyApiKey(apiKey)) return c.json({
-            error: "invalid api key"
-        }, 401)
-
-        await next()
-
-    });
-
     app.post("/api/v1/server/status/:serverId/:status", async (c: Context) => {
 
         let customkey = c.req.query("customkey")
@@ -70,12 +56,12 @@ function serverRoutes(app: Hono) {
         const status = c.req.param("status")
 
         if (status !== "online" && status !== "offline" && status !== "gamestarted") return c.json({
-            error: "status missing"
+            error: "Status missing"
         }, 400)
 
         const server = serverArray.find(server => server.serverId === serverId)
         if (!server) return c.json({
-            error: "server not found"
+            error: "Server not found"
         }, 404)
 
         const statusString = status as string;
@@ -102,7 +88,7 @@ function serverRoutes(app: Hono) {
         channel.sendToQueue("matchmaker", Buffer.from(JSON.stringify(msg)))
 
         return c.json({
-            message: `set server ${serverId} status to ${statusEnum}`
+            message: `Set server ${serverId} status to ${statusEnum}`
         }, 200)
 
     });
@@ -115,7 +101,7 @@ function serverRoutes(app: Hono) {
         let server = serverArray.find(server => server.serverId === serverId)
 
         if (!server) return c.json({
-            error: "server not found"
+            error: "Server not found"
         }, 404)
 
         server.playlist = playlist
@@ -124,6 +110,76 @@ function serverRoutes(app: Hono) {
 
         return c.json({
             message: "success",
+        }, 200)
+
+    });
+
+    app.put("/api/v1/server/create", async (c: Context) => {
+
+        const body = await c.req.json()
+
+        const parameters = [
+            "serverId",
+            "region",
+            "playlist",
+            "status",
+            "maxPlayers",
+            "players",
+        ]
+
+        for (const parameter of parameters) {
+            if (!body[parameter]) return c.json({
+                error: `${parameter} missing`
+            }, 400)
+        }
+
+        const serverId = body.serverId
+        const region = body.region
+        const playlist = body.playlist
+        const status = body.status
+        const maxPlayers = body.maxPlayers
+        const customkey = body.customkey || "none"
+
+        if (status !== "online" && status !== "offline" && status !== "gamestarted") return c.json({
+            error: "Wrong format for status, must be online, offline or gamestarted"
+        }, 400)
+
+        const statusString = status as string;
+        const statusEnum = ServerStatus[statusString.toUpperCase()];
+        const regionString = region as string;
+        const regionEnum = ServerRegion[regionString.toUpperCase()];
+
+        const server: Server = {
+            serverId: serverId,
+            region: regionEnum,
+            playlist: playlist,
+            status: statusEnum,
+            maxPlayers: maxPlayers,
+            players: 0,
+            customkey: customkey
+        }
+
+        serverArray.push(server)
+
+        return c.json({
+            message: "Successfully added server to server array",
+        }, 200)
+
+    });
+
+    app.delete("/api/v1/server/delete/:serverId", async (c: Context) => {
+
+        const serverId = c.req.param("serverId")
+
+        const server = serverArray.find(server => server.serverId === serverId)
+        if (!server) return c.json({
+            error: "Server not found"
+        }, 404)
+
+        serverArray.splice(serverArray.findIndex(server => server.serverId === serverId), 1)
+
+        return c.json({
+            message: `Successfully deleted server ${serverId}`,
         }, 200)
 
     });

@@ -1,10 +1,15 @@
 import fastify, { FastifyInstance } from 'fastify'
 import WebSocket, { WebSocketServer } from 'ws';
 import Matchmaker from './matchmaker.js';
-import { dirname } from 'dirname-filename-esm'
 import { serve } from '@hono/node-server'
-import { Hono } from 'hono'
+import { Context, Hono } from 'hono'
 import serverRoutes from './routes/server.js';
+import verifyApiKey from './utilities/verifyapi.js';
+import apiKeysRoutes from './routes/keys.js';
+import db from './database/connection.js';
+import { users } from './database/schema.js';
+
+const allUsers = await db.select().from(users);
 
 const MMPORT = 8080
 const PORT = 3000
@@ -13,7 +18,22 @@ export const app = new Hono({
     strict: false,
 })
 
+app.use('/api/v1/*', async (c: Context, next) => {
+
+    const apiKey = c.req.header("x-api-key")
+    if (!apiKey) return c.json({
+        error: "Api key missing"
+    }, 400)
+    if (!verifyApiKey(apiKey)) return c.json({
+        error: "Invalid api key"
+    }, 401)
+
+    await next()
+
+});
+
 serverRoutes(app)
+apiKeysRoutes(app)
 
 const wss = new WebSocketServer({
     port: MMPORT,
