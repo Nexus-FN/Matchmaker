@@ -26,7 +26,7 @@ class Matchmaker {
             decrypted = aes256.decrypt(Buffer.from(encrypted, 'base64')).toString();
         }
         catch (err) {
-            decrypted = `{"accountId":"1234","playlist":"playlist_defaultsolo","region":"NAE","timestamp":"${currentTime}","customkey":"none"}`;
+            decrypted = `{"accountId":"${uuidv4()}","playlist":"playlist_defaultsolo","region":"NAE","timestamp":"${currentTime}","customkey":"none"}`;
         }
         const decryptedSchema = z.object({
             accountId: z.string(),
@@ -69,7 +69,7 @@ class Matchmaker {
                 switch (message.action) {
                     case 'UPDATE':
                         console.log(`${message.data.clientAmount} clients in queue for ${message.data.playlist} in ${message.data.region} with custom key ${message.data.customkey}`);
-                        await Queued(message.data.clientAmount, message.data.playlist, message.data.region, message.data.customkey);
+                        await Queued(message.data.playlist, message.data.region, message.data.customkey);
                         const server = serverArray.find(server => server.region === message.data.region && server.playlist === message.data.playlist && (server.customkey === message.data.customkey || server.customkey === "none") && server.status === ServerStatus.ONLINE);
                         const customkey = server ? message.data.customkey : "none";
                         if (!server)
@@ -169,11 +169,7 @@ class Matchmaker {
                 name: "StatusUpdate",
             }));
         }
-        async function Queued(players, playlistarg, regionarg, customkeyarg) {
-            //console.log(`Queued. Players: ${players}. Typeof players: ${typeof players}`);
-            if (typeof players !== "number") {
-                players = 0;
-            }
+        async function Queued(playlistarg, regionarg, customkeyarg) {
             const sortedClients = Array.from(clients.values())
                 .filter(value => value.playlist === playlistarg
                 && value.region === regionarg
@@ -202,8 +198,9 @@ class Matchmaker {
                 && value.customkey === customkeyarg)
                 .sort((a, b) => a.joinTime - b.joinTime)
                 .slice(0, maxPlayers);
+            console.log(sortedClients);
             for (const [index, client] of sortedClients.entries()) {
-                console.log(`Sending join to ${client.accountId} because their position is ${index}`);
+                console.log(`Assigning session to ${client.accountId} because their position is ${index}`);
                 client.socket.send(JSON.stringify({
                     payload: {
                         matchId: client.matchId,
@@ -222,9 +219,10 @@ class Matchmaker {
                 && value.customkey === customkeyarg)
                 .sort((a, b) => a.joinTime - b.joinTime)
                 .slice(0, maxPlayers);
+            console.log(sortedClients);
             for (const [index, client] of sortedClients.entries()) {
                 console.log(client);
-                console.log(`Assigning session to ${client.accountId} because their position is ${index}`);
+                console.log(`Sending join to ${client.accountId} because their position is ${index}`);
                 client.socket.send(JSON.stringify({
                     payload: {
                         matchId: client.matchId,
