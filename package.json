@@ -1,0 +1,31 @@
+{
+  "name": "matchmaker",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@hono/node-server": "^1.0.2",
+    "@ryanbekhen/cryptkhen": "^3.2.0",
+    "amqplib": "^0.10.3",
+    "dirname-filename-esm": "^1.1.1",
+    "fastify": "^4.19.2",
+    "hono": "^3.3.0",
+    "uuid": "^9.0.0",
+    "ws": "^8.13.0",
+    "zod": "^3.21.4"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.1",
+    "@types/node": "^20.4.2",
+    "@types/uuid": "^9.0.2",
+    "@types/ws": "^8.5.5",
+    "typescript": "^5.1.6"
+  }
+}

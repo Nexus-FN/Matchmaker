@@ -1,0 +1,1 @@
+{"version":3,"file":"verifyapi.js","sourceRoot":"","sources":["../../src/utilities/verifyapi.ts"],"names":[],"mappings":"AAAA,MAAM,OAAO,GAAa;IACtB,mCAAmC,CAAC,sBAAsB;CAC7D,CAAA;AAED,SAAS,YAAY,CAAC,MAAc;IAChC,IAAG,CAAC,OAAO,CAAC,QAAQ,CAAC,MAAM,CAAC;QAAE,OAAO,KAAK,CAAC;IAC3C,OAAO,IAAI,CAAC;AAChB,CAAC;AAED,eAAe,YAAY,CAAA"}
