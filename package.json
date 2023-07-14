@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "generate": "drizzle-kit generate:pg",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -15,9 +16,10 @@
     "@ryanbekhen/cryptkhen": "^3.2.0",
     "amqplib": "^0.10.3",
     "dirname-filename-esm": "^1.1.1",
+    "dotenv": "^16.3.1",
     "drizzle-orm": "^0.27.2",
-    "fastify": "^4.19.2",
     "hono": "^3.3.0",
+    "pg": "^8.11.1",
     "postgres": "^3.3.5",
     "uuid": "^9.0.0",
     "ws": "^8.13.0",
@@ -26,6 +28,7 @@
   "devDependencies": {
     "@types/amqplib": "^0.10.1",
     "@types/node": "^20.4.2",
+    "@types/pg": "^8.10.2",
     "@types/uuid": "^9.0.2",
     "@types/ws": "^8.5.5",
     "drizzle-kit": "^0.19.5",

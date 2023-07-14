@@ -1,8 +1,8 @@
 {
   "version": "5",
   "dialect": "pg",
-  "id": "5222a95d-d379-448f-973f-18ac6a9e4304",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "04465c0d-786a-422f-a4a9-4cd4efe7f061",
+  "prevId": "5222a95d-d379-448f-973f-18ac6a9e4304",
   "tables": {
     "loopkeys": {
       "name": "loopkeys",
@@ -87,6 +87,18 @@
         "customkey": {
           "name": "customkey",
           "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip": {
+          "name": "ip",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "port": {
+          "name": "port",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         }

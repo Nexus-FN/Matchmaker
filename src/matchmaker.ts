@@ -5,10 +5,13 @@ import { setTimeout } from "timers";
 import { Message } from 'amqplib/callback_api'
 import { z } from "zod";
 import { v4 as uuidv4 } from 'uuid';
+import db from './database/connection.js';
+import { servers, users, Server } from './database/schema.js';
+import { eq, lt, gte, ne, and } from "drizzle-orm";
 
 import { AES256Encryption, RSAEncryption } from '@ryanbekhen/cryptkhen';
 import { channel } from "./utilities/rabbitmq.js";
-import { Server, ServerStatus, serverArray } from './routes/server.js';
+import { ServerStatus } from './routes/server.js';
 
 type Client = {
     accountId: string,
@@ -54,7 +57,7 @@ class Matchmaker {
         try {
             decrypted = aes256.decrypt(Buffer.from(encrypted, 'base64')).toString();
         } catch (err) {
-            decrypted = `{"accountId":"${uuidv4()}","playlist":"playlist_defaultsolo","region":"NAE","timestamp":"${currentTime}","customkey":"none"}`;
+            return ws.close(1008, 'invalid_payload');
         }
 
         const decryptedSchema = z.object({
@@ -62,6 +65,7 @@ class Matchmaker {
             playlist: z.string(),
             region: z.string(),
             customkey: z.string(),
+            priority: z.boolean(),
             timestamp: z.string(),
         });
 
@@ -75,18 +79,22 @@ class Matchmaker {
 
         if (this.clients.has(decryptedData.data.accountId)) return ws.close(1008, 'already_queued');
 
-        const { playlist, accountId, region, customkey } = decryptedData.data;
+        const { playlist, accountId, region, customkey, priority } = decryptedData.data;
 
         const ticketId = uuidv4().toString().replace(/-/ig, "");
         const matchId = uuidv4().toString().replace(/-/ig, "");
         const sessionId = uuidv4().toString().replace(/-/ig, "");
+
+        const tenMinutesAgo = new Date();
+        tenMinutesAgo.setMinutes(tenMinutesAgo.getMinutes() - 10);
+        const tenMinutesAgoISO = tenMinutesAgo.toISOString();
 
         const clientInfo: Client = {
             accountId: accountId,
             playlist: playlist,
             region: region,
             socket: ws,
-            joinTime: currentTime,
+            joinTime: priority ? tenMinutesAgoISO : currentTime,
             ticketId: ticketId,
             matchId: matchId,
             sessionId: sessionId,
@@ -104,27 +112,30 @@ class Matchmaker {
                 const message = JSON.parse(msg.content.toString())
                 switch (message.action) {
                     case 'UPDATE':
-                        console.log(`${message.data.clientAmount} clients in queue for ${message.data.playlist} in ${message.data.region} with custom key ${message.data.customkey}`);
 
                         await Queued(message.data.playlist, message.data.region, message.data.customkey);
 
-                        const server = serverArray.find(server => server.region === message.data.region && server.playlist === message.data.playlist && (server.customkey === message.data.customkey || server.customkey === "none") && server.status === ServerStatus.ONLINE);
-                        const customkey = server ? message.data.customkey : "none";
+                        const serverquery = await db.select().from(servers).where(
+                            and(
+                                eq(servers.playlist, message.data.playlist),
+                                eq(servers.region, message.data.region),
+                                eq(servers.customkey, message.data.customkey),
+                                eq(servers.status, ServerStatus.ONLINE)
+                            )
+                        );
+                        if (serverquery.length == 0) return
+                        const server = serverquery[0] as Server;
 
-                        if (!server) {
-                            return console.log("No servers available");
-                        }
                         if (message.data.type == "CLOSE") return;
 
                         const sortedClients = Array.from(clients.values())
-                            .filter(value => value.playlist === server.playlist
+                            .filter(value =>
+                                value.playlist === server.playlist
                                 && value.region === server.region
                                 && value.customkey === server.customkey
                                 && value.preventmessage === false)
                             .sort((a, b) => a.joinTime - b.joinTime)
-                            .slice(0, server.maxPlayers);
-
-                        console.log(`Found server ${server.serverId} for ${message.data.playlist} in ${message.data.region} with custom key ${customkey}`);
+                            .slice(0, server.maxplayers!);
 
                         SessionAssignment(sortedClients, server);
 
@@ -135,7 +146,6 @@ class Matchmaker {
                         break;
 
                     case 'STATUS':
-                        console.log("Received status update");
 
                         try {
                             if (message.data.status !== 'online') {
@@ -145,22 +155,29 @@ class Matchmaker {
                             const data = message.data;
 
                             const sortedClients = Array.from(clients.values())
-                                .filter(value => value.playlist === data.playlist
+                                .filter(value =>
+                                    value.playlist === data.playlist
                                     && value.region === data.region
                                     && value.customkey === data.customkey
                                     && value.preventmessage === false)
                                 .sort((a, b) => a.joinTime - b.joinTime);
 
-                            const serverarg = serverArray.find(server => server.region === data.region && server.playlist === data.playlist && (server.customkey === data.customkey || server.customkey === "none") && server.status === ServerStatus.ONLINE);
-                            if (!serverarg) {
-                                return console.log("No servers available");
-                            }
+                            const serverquery = await db.select().from(servers).where(
+                                and(
+                                    eq(servers.playlist, message.data.playlist),
+                                    eq(servers.region, message.data.region),
+                                    eq(servers.customkey, message.data.customkey),
+                                    eq(servers.status, ServerStatus.ONLINE)
+                                )
+                            )
+                            if (serverquery.length == 0) return;
+                            const server = serverquery[0] as Server;
 
                             setTimeout(async () => {
-                                SessionAssignment(sortedClients, serverarg);
+                                SessionAssignment(sortedClients, server);
 
                                 setTimeout(async () => {
-                                    Join(sortedClients, serverarg);
+                                    Join(sortedClients, server);
                                 }, 200);
                             }, 100);
 
@@ -180,7 +197,7 @@ class Matchmaker {
 
         ws.on('close', () => {
             const deleted = this.clients.delete(accountId)
-            if (!deleted) return console.log("Client was not deleted as it was not found in the map");
+            if (!deleted) return;
             const msg = {
                 action: 'UPDATE',
                 data: {
@@ -261,7 +278,7 @@ class Matchmaker {
                 .sort((a, b) => a.joinTime - b.joinTime);
 
             for (const client of sortedClients) {
-                if(client.preventmessage === true) continue;
+                if (client.preventmessage === true) continue;
                 (client.socket as WebSocket).send(
                     JSON.stringify({
                         payload: {
@@ -278,16 +295,14 @@ class Matchmaker {
         }
 
         async function SessionAssignment(sortedClients: any, serverarg: Server) {
-
             for (const [index, client] of sortedClients.entries()) {
-                const serverfound = serverArray.find(server => server.serverId === serverarg.serverId);
-                if (!serverfound) return console.log("Server not found");
-                if (serverfound.players >= serverfound.maxPlayers) return console.log("Server is full");
-                if (index >= serverarg.maxPlayers) {
-                    console.log(`Index is higher than maxPlayers for ${client.accountId}`);
-                    break;
-                }
-                console.log(`Assigning session to ${client.accountId} because their position is ${index}`);
+
+                if (!serverarg) return;
+                if (serverarg.maxplayers == undefined || serverarg.players == undefined) return ;
+
+                if (serverarg.players >= serverarg.maxplayers) return;
+
+                if (index >= serverarg.maxplayers) return;
 
                 (client.socket as WebSocket).send(
                     JSON.stringify({
@@ -302,22 +317,20 @@ class Matchmaker {
         }
 
         async function Join(sortedClients: any, serverarg: Server) {
-            const server = serverArray.find(server => server.serverId === serverarg.serverId);
-            if (!server) {
-                return console.log("Server not found");
-            }
+            if (!serverarg) return;
+            if (serverarg.maxplayers == undefined || serverarg.players == undefined) return;
 
-            const maxPlayers = Math.min(server.maxPlayers, sortedClients.length);
+            if (serverarg.players >= serverarg.maxplayers) return;
+
+            if (serverarg.maxplayers === null) return;
+            if (serverarg.players >= serverarg.maxplayers) return;
+            const maxPlayers = Math.min(serverarg.maxplayers, sortedClients.length);
             const clientsToJoin = sortedClients.slice(0, maxPlayers);
 
             for (const [index, client] of clientsToJoin.entries()) {
-                if (server.players >= server.maxPlayers) {
-                    console.log("Server is full");
-                    break;
-                }
-
-                console.log(`Sending join to ${client.accountId} because their position is ${index}`);
+                if (serverarg.players >= serverarg.maxplayers) break;
                 client.preventmessage = true;
+
                 (client.socket as WebSocket).send(
                     JSON.stringify({
                         payload: {
@@ -329,7 +342,7 @@ class Matchmaker {
                     })
                 );
 
-                server.players++;
+                serverarg.players++;
             }
         }
     }

@@ -1,4 +1,3 @@
-import fastify, { FastifyInstance } from 'fastify'
 import WebSocket, { WebSocketServer } from 'ws';
 import Matchmaker from './matchmaker.js';
 import { serve } from '@hono/node-server'
@@ -7,9 +6,9 @@ import serverRoutes from './routes/server.js';
 import verifyApiKey from './utilities/verifyapi.js';
 import apiKeysRoutes from './routes/keys.js';
 import db from './database/connection.js';
-import { users } from './database/schema.js';
+import { migrate } from "drizzle-orm/postgres-js/migrator";
 
-const allUsers = await db.select().from(users);
+await migrate(db, { migrationsFolder: 'drizzle' });
 
 const MMPORT = 8080
 const PORT = 3000
@@ -24,7 +23,7 @@ app.use('/api/v1/*', async (c: Context, next) => {
     if (!apiKey) return c.json({
         error: "Api key missing"
     }, 400)
-    if (!verifyApiKey(apiKey)) return c.json({
+    if (await verifyApiKey(apiKey) == false) return c.json({
         error: "Invalid api key"
     }, 401)
 
@@ -71,8 +70,6 @@ process.on('SIGINT', function () {
 
 //on websocket connection, return matchmaker
 wss.on('connection', (ws: WebSocket, req) => {
-
-    console.log(req)
 
     let id = Math.random().toString(36).substring(7)
     clients.set(id, ws)

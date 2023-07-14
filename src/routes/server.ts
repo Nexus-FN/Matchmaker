@@ -1,11 +1,15 @@
+import db from "../database/connection.js";
+import { Server, servers } from "../database/schema.js";
 import { channel } from "../utilities/rabbitmq.js";
-import verifyApiKey from "../utilities/verifyapi.js";
 import { Context, Hono, Next } from "hono";
+import { eq, lt, gte, ne, and, sql } from "drizzle-orm";
+import { PgSerial } from "drizzle-orm/pg-core/index.js";
 
 export enum ServerStatus {
     ONLINE = "online",
     OFFLINE = "offline",
-    GAMESTARTED = "gamestarted"
+    GAMESTARTED = "gamestarted",
+    GAMEENDED = "gamenended"
 }
 
 export enum ServerRegion {
@@ -14,36 +18,35 @@ export enum ServerRegion {
     OCE = "OCE",
 }
 
-export interface Server {
-    serverId: string
-    region: string
-    playlist: string
-    status: ServerStatus
-    maxPlayers: number
-    players: number
-    customkey?: string
+function determinePicture(serverStatus: ServerStatus): string {
+
+    switch (serverStatus) {
+        case ServerStatus.ONLINE:
+            return "https://greencade.com/wp-content/uploads/2023/06/V01gNfN-removebg-preview.png"
+        case ServerStatus.OFFLINE:
+            return "https://static.tvtropes.org/pmwiki/pub/images/384px_ray.png"
+        case ServerStatus.GAMESTARTED:
+            return "https://static.wikia.nocookie.net/fortnite/images/d/d7/Battle_Bus_-_Vehicle_-_Fortnite.png/revision/latest?cb=20210927140325"
+        case ServerStatus.GAMEENDED:
+            return "https://static.wikia.nocookie.net/fortnite/images/1/1e/VictoryRoyaleSlate.png/revision/latest?cb=20220329154427"
+    }
+
 }
 
-export const serverArray: Server[] = [
-    {
-        serverId: "1",
-        region: "NAE",
-        playlist: "playlist_defaultsolo",
-        status: ServerStatus.OFFLINE,
-        maxPlayers: 100,
-        players: 0,
-        customkey: "none"
-    },
-    {
-        serverId: "2",
-        region: "EU",
-        playlist: "playlist_defaultsolo",
-        status: ServerStatus.OFFLINE,
-        maxPlayers: 100,
-        players: 0,
-        customkey: "none"
-    },
-]
+function determineTitle(serverStatus: ServerStatus, serverId: string): string {
+
+    switch (serverStatus) {
+        case ServerStatus.ONLINE:
+            return `Server ${serverId} is now online`
+        case ServerStatus.OFFLINE:
+            return `Server ${serverId} is now offline`
+        case ServerStatus.GAMESTARTED:
+            return `Server ${serverId}'s round has been started. You can no longer join this server.`
+        case ServerStatus.GAMEENDED:
+            return `Server ${serverId}'s round has ended. GG!`
+    }
+
+}
 
 function serverRoutes(app: Hono) {
 
@@ -52,17 +55,18 @@ function serverRoutes(app: Hono) {
         let customkey = c.req.query("customkey")
         if (!customkey) customkey = "none"
 
-        const serverId = c.req.param("serverId")
+        const serverId = c.req.param("serverId");
         const status = c.req.param("status")
 
-        if (status !== "online" && status !== "offline" && status !== "gamestarted") return c.json({
+        if (status !== "online" && status !== "offline" && status !== "gamestarted" && status !== "gameended") return c.json({
             error: "Status missing"
         }, 400)
 
-        const server = serverArray.find(server => server.serverId === serverId)
-        if (!server) return c.json({
+        const serverquery = await db.select().from(servers).where(sql`${servers.id} = ${serverId}`);
+        if (serverquery.length == 0) return c.json({
             error: "Server not found"
         }, 404)
+        const server = serverquery[0]
 
         const statusString = status as string;
         const statusEnum = ServerStatus[statusString.toUpperCase()];
@@ -70,14 +74,14 @@ function serverRoutes(app: Hono) {
         server.status = statusEnum
         server.players = 0
 
-        serverArray[serverArray.findIndex(server => server.serverId === serverId)] = server
+        await db.update(servers).set(server).where(sql`${servers.id} = ${serverId}`)
 
         const msg = {
             action: "STATUS",
             data: {
                 playlist: server.playlist,
                 region: server.region,
-                status: status,
+                status: status == "gamestarted" ? "offline" : status,
                 customkey: customkey,
                 serverid: serverId
             }
@@ -86,6 +90,47 @@ function serverRoutes(app: Hono) {
         console.log(msg)
 
         channel.sendToQueue("matchmaker", Buffer.from(JSON.stringify(msg)))
+
+        const formattedPlaylist = server.playlist!.toLowerCase().replace("playlist_default", "").replace("_", " ").toUpperCase()
+
+        const webhook = await fetch("https://discord.com/api/webhooks/1129469545959137402/rWoZxcdihnfr-AnyYiq0s5IRPxzYx4cYE143okLf7_MugFr3N0QrNbbkS1zPUW9D5I9p", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                "content": null,
+                "embeds": [
+                    {
+                        "title": "Server status",
+                        "description": `${determineTitle(statusEnum, serverId)}`,
+                        "color": 2829617,
+                        "fields": [
+                            {
+                                "name": "Region",
+                                "value": server.region
+                            },
+                            {
+                                "name": "Playlist",
+                                "value": formattedPlaylist
+                            }
+                        ],
+                        "footer": {
+                            "text": "Eon",
+                            "icon_url": "https://cdn.discordapp.com/icons/1050468815319859291/98ed16d6b118e46a7983e1ee7ac04070.webp?size=96"
+                        },
+                        "timestamp": new Date().toISOString(),
+                        "thumbnail": {
+                            "url": determinePicture(statusEnum)
+                        }
+                    }
+                ],
+                "attachments": []
+            })
+        })
+        if (webhook.status !== 204) return c.json({
+            error: "Webhook failed"
+        }, 500)
 
         return c.json({
             message: `Set server ${serverId} status to ${statusEnum}`
@@ -98,15 +143,15 @@ function serverRoutes(app: Hono) {
         const serverId = c.req.param("serverId")
         const playlist = c.req.param("playlist")
 
-        let server = serverArray.find(server => server.serverId === serverId)
-
-        if (!server) return c.json({
+        let serverquery = await db.select().from(servers).where(sql`${servers.id} = ${serverId}`);
+        if (serverquery.length == 0) return c.json({
             error: "Server not found"
         }, 404)
+        let server = serverquery[0]
 
         server.playlist = playlist
 
-        serverArray[serverArray.findIndex(server => server.serverId === serverId)] = server
+        await db.update(servers).set(server).where(sql`${servers.id} = ${serverId}`)
 
         return c.json({
             message: "success",
@@ -125,6 +170,8 @@ function serverRoutes(app: Hono) {
             "status",
             "maxPlayers",
             "players",
+            "ip",
+            "port"
         ]
 
         for (const parameter of parameters) {
@@ -133,36 +180,32 @@ function serverRoutes(app: Hono) {
             }, 400)
         }
 
-        const serverId = body.serverId
         const region = body.region
         const playlist = body.playlist
-        const status = body.status
         const maxPlayers = body.maxPlayers
         const customkey = body.customkey || "none"
+        const ip = body.ip;
+        const port = body.port;
 
-        if (status !== "online" && status !== "offline" && status !== "gamestarted") return c.json({
-            error: "Wrong format for status, must be online, offline or gamestarted"
-        }, 400)
-
-        const statusString = status as string;
-        const statusEnum = ServerStatus[statusString.toUpperCase()];
         const regionString = region as string;
         const regionEnum = ServerRegion[regionString.toUpperCase()];
 
-        const server: Server = {
-            serverId: serverId,
+        const server = {
             region: regionEnum,
             playlist: playlist,
-            status: statusEnum,
-            maxPlayers: maxPlayers,
+            status: ServerStatus.OFFLINE,
+            maxplayers: maxPlayers,
             players: 0,
-            customkey: customkey
+            customkey: customkey,
+            ip: ip,
+            port: port
         }
 
-        serverArray.push(server)
+        await db.insert(servers).values(server);
 
         return c.json({
             message: "Successfully added server to server array",
+            server: server
         }, 200)
 
     });
@@ -171,12 +214,10 @@ function serverRoutes(app: Hono) {
 
         const serverId = c.req.param("serverId")
 
-        const server = serverArray.find(server => server.serverId === serverId)
-        if (!server) return c.json({
+        const deleteServer = await db.delete(servers).where(sql`${servers.id} = ${serverId}`)
+        if (deleteServer.count == 0) return c.json({
             error: "Server not found"
         }, 404)
-
-        serverArray.splice(serverArray.findIndex(server => server.serverId === serverId), 1)
 
         return c.json({
             message: `Successfully deleted server ${serverId}`,
