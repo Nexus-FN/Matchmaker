@@ -6,3 +6,4 @@ build/**.js.map
 build/**
 build/**.d.ts
 build/index.js.map
+build
