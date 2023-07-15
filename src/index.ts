@@ -1,16 +1,9 @@
-import dotenv from 'dotenv';
-dotenv.config()
-
-import WebSocket, { WebSocketServer } from 'ws';
-import Matchmaker from './matchmaker.js';
 import { serve } from '@hono/node-server'
-import { Context, Hono } from 'hono'
-import serverRoutes from './routes/server.js';
-import verifyApiKey from './utilities/verifyapi.js';
-import apiKeysRoutes from './routes/keys.js';
-import db from './database/connection.js';
-import { migrate } from "drizzle-orm/postgres-js/migrator";
+import dotenv from 'dotenv';
+import { Hono } from 'hono'
+import WebSocket, { WebSocketServer } from 'ws';
 import { z } from 'zod';
+dotenv.config()
 
 global.bindMomentum = false;
 
@@ -19,14 +12,20 @@ const envSchema = z.object({
     RABBITMQ_URI: z.string(),
     MOMENTUM_INSTANCE_URL: z.string().url()
 })
-const env = envSchema.safeParse(process.env)
-if (!env.success) throw new Error(env.error.message)
+const envparse = envSchema.safeParse(process.env)
+if (!envparse.success) throw new Error(envparse.error.message)
+
+//import db from './database/connection.js';
+import Matchmaker from './matchmaker.js';
+import apiKeysRoutes from './routes/keys.js';
+import serverRoutes from './routes/server.js';
+import verifyApiKey from './utilities/verifyapi.js';
 
 //Do you want to migrate the database? Uncomment this line, be careful though.
 //await migrate(db, { migrationsFolder: 'drizzle' });
 
-const MMPORT = 8080
-const PORT = 3000
+const MMPORT = process.env.MM_PORT;
+const PORT = process.env.HTTP_PORT;
 
 export const app = new Hono({
     strict: false,
@@ -34,7 +33,7 @@ export const app = new Hono({
 
 //Middleware for auth
 
-app.use('/api/v1/*', async (c: Context, next) => {
+app.use('/api/v1/*', async (c, next) => {
 
     const apiKey = c.req.header("x-api-key")
     if (!apiKey) return c.json({
@@ -76,17 +75,18 @@ const wss = new WebSocketServer({
     }
 });
 
-let clients = new Map<string, WebSocket>()
+const clients = new Map<string, WebSocket>()
 
 process.on('SIGINT', function () {
-    for (let [id, ws] of clients) {
+    for (const [id, ws] of clients) {
+        if (!id) continue;
         ws.close(1008, 'Matchmaker shutting down')
     }
     process.exit();
 })
 
 wss.on('connection', (ws: WebSocket, req) => {
-    let id = Math.random().toString(36).substring(7)
+    const id = Math.random().toString(36).substring(7)
     clients.set(id, ws)
     return Matchmaker.server(ws, req)
 })

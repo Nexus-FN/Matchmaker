@@ -12,8 +12,8 @@ export const users = pgTable('users', {
     password: varchar('password', { length: 256 }),
 });
 
-type User = InferModel<typeof users, "select">;
-type NewUser = InferModel<typeof users, "insert">;
+export type User = InferModel<typeof users, "select">;
+export type NewUser = InferModel<typeof users, "insert">;
 
 export const loopkeys = pgTable('loopkeys', {
     id: serial('id').primaryKey(),
@@ -23,8 +23,8 @@ export const loopkeys = pgTable('loopkeys', {
     modules: text('modules'),
 });
 
-type Loopkey = InferModel<typeof loopkeys, "select">;
-type NewLoopkey = InferModel<typeof loopkeys, "insert">;
+export type Loopkey = InferModel<typeof loopkeys, "select">;
+export type NewLoopkey = InferModel<typeof loopkeys, "insert">;
 
 export const servers = pgTable('servers', {
     id: serial('id').primaryKey(),
@@ -39,4 +39,4 @@ export const servers = pgTable('servers', {
 });
 
 export type Server = InferModel<typeof servers, "select">;
-type NewServer = InferModel<typeof servers, "insert">;
+export type NewServer = InferModel<typeof servers, "insert">;

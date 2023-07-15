@@ -1,23 +1,22 @@
-export { }
-
-import WebSocket from 'ws';
 import { setTimeout } from "timers";
-import { Message } from 'amqplib/callback_api'
-import { z } from "zod";
-import { v4 as uuidv4 } from 'uuid';
-import db from './database/connection.js';
-import { servers, users, Server } from './database/schema.js';
-import { eq, lt, gte, ne, and } from "drizzle-orm";
 
-import { AES256Encryption, RSAEncryption } from '@ryanbekhen/cryptkhen';
-import { channel } from "./utilities/rabbitmq.js";
+import { AES256Encryption } from '@ryanbekhen/cryptkhen';
+import { Message } from 'amqplib/callback_api'
+import { eq, and } from "drizzle-orm";
+import { v4 as uuidv4 } from 'uuid';
+import WebSocket from 'ws';
+import { z } from "zod";
+
+import db from './database/connection.js';
+import { servers, Server } from './database/schema.js';
 import { ServerStatus } from './routes/server.js';
+import { channel } from "./utilities/rabbitmq.js";
 
 type Client = {
     accountId: string,
     playlist: string,
     region: string,
-    socket: Object
+    socket: object
     joinTime: string,
     ticketId: string,
     matchId: string,
@@ -35,7 +34,7 @@ class Matchmaker {
 
     public async server(ws: WebSocket, req) {
 
-        let clients = this.clients;
+        const clients = this.clients;
 
         const auth = req.headers['authorization']
 
@@ -45,7 +44,7 @@ class Matchmaker {
         }
 
         // Destructure the authorization header
-        let [_, __, ___, encrypted] = auth.split(" ");
+        const [, , , encrypted] = auth.split(" ");
         if (!encrypted) return ws.close(1008, 'invalid_payload');
 
         let decrypted: string;
@@ -111,7 +110,7 @@ class Matchmaker {
             if (msg) {
                 const message = JSON.parse(msg.content.toString())
                 switch (message.action) {
-                    case 'UPDATE':
+                    case 'UPDATE': {
 
                         await Queued(message.data.playlist, message.data.region, message.data.customkey);
 
@@ -144,8 +143,8 @@ class Matchmaker {
                         }, 200);
 
                         break;
-
-                    case 'STATUS':
+                    }
+                    case 'STATUS': {
 
                         try {
                             if (message.data.status !== 'online') {
@@ -180,15 +179,16 @@ class Matchmaker {
                                     Join(sortedClients, server);
                                 }, 200);
                             }, 100);
-
                             break;
                         } catch (err) {
                             //console.log(err)
                         }
-
-                    default:
+                    }
+                        break;
+                    default: {
                         //console.log("Unknown action")
                         break;
+                    }
                 }
                 //console.log(message)
                 channel.ack(msg)
@@ -294,11 +294,11 @@ class Matchmaker {
             }
         }
 
-        async function SessionAssignment(sortedClients: any, serverarg: Server) {
+        async function SessionAssignment(sortedClients: Client[], serverarg: Server) {
             for (const [index, client] of sortedClients.entries()) {
 
                 if (!serverarg) return;
-                if (serverarg.maxplayers == undefined || serverarg.players == undefined) return ;
+                if (serverarg.maxplayers == undefined || serverarg.players == undefined) return;
 
                 if (serverarg.players >= serverarg.maxplayers) return;
 
@@ -316,7 +316,7 @@ class Matchmaker {
             }
         }
 
-        async function Join(sortedClients: any, serverarg: Server) {
+        async function Join(sortedClients: Client[], serverarg: Server) {
             if (!serverarg) return;
             if (serverarg.maxplayers == undefined || serverarg.players == undefined) return;
 
@@ -328,6 +328,7 @@ class Matchmaker {
             const clientsToJoin = sortedClients.slice(0, maxPlayers);
 
             for (const [index, client] of clientsToJoin.entries()) {
+                if (!index) continue;
                 if (serverarg.players >= serverarg.maxplayers) break;
                 client.preventmessage = true;
 

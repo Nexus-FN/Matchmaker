@@ -1,9 +1,9 @@
+import { sql } from "drizzle-orm";
+import { Context, Hono } from "hono";
+
 import db from "../database/connection.js";
-import { Server, servers } from "../database/schema.js";
+import { servers } from "../database/schema.js";
 import { channel } from "../utilities/rabbitmq.js";
-import { Context, Hono, Next } from "hono";
-import { eq, lt, gte, ne, and, sql } from "drizzle-orm";
-import { PgSerial } from "drizzle-orm/pg-core/index.js";
 
 export enum ServerStatus {
     ONLINE = "online",
@@ -143,11 +143,11 @@ function serverRoutes(app: Hono) {
         const serverId = c.req.param("serverId")
         const playlist = c.req.param("playlist")
 
-        let serverquery = await db.select().from(servers).where(sql`${servers.id} = ${serverId}`);
+        const serverquery = await db.select().from(servers).where(sql`${servers.id} = ${serverId}`);
         if (serverquery.length == 0) return c.json({
             error: "Server not found"
         }, 404)
-        let server = serverquery[0]
+        const server = serverquery[0]
 
         server.playlist = playlist
 
@@ -248,10 +248,10 @@ function serverRoutes(app: Hono) {
         let momentumInfo: MomentumInfo | null = null
 
         //Weird variable names but I just wrote this at 02:02 AM and I'm tired
-        if(global.bindMomentum == true) {
+        if (global.bindMomentum == true) {
 
             const momentumData = await fetch(process.env.MOMENTUM_INSTANCE_URL)
-            if(momentumData.status !== 200) return c.json({
+            if (momentumData.status !== 200) return c.json({
                 error: "Momentum instance is offline"
             }, 500)
             const momentumJson = await momentumData.json()
