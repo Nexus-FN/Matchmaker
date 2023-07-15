@@ -19,8 +19,8 @@ const envSchema = z.object({
     RABBITMQ_URI: z.string(),
     MOMENTUM_INSTANCE_URL: z.string().url()
 })
-const env = envSchema.parse(process.env)
-console.log(env)
+const env = envSchema.safeParse(process.env)
+if (!env.success) throw new Error(env.error.message)
 
 //Do you want to migrate the database? Uncomment this line, be careful though.
 //await migrate(db, { migrationsFolder: 'drizzle' });
