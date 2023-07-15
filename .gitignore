@@ -7,3 +7,7 @@ build/**
 build/**.d.ts
 build/index.js.map
 build
+.env*
+.flaskenv*
+!.env.project
+!.env.vault

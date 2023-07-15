@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config()
+
 import WebSocket, { WebSocketServer } from 'ws';
 import Matchmaker from './matchmaker.js';
 import { serve } from '@hono/node-server'
@@ -7,8 +10,20 @@ import verifyApiKey from './utilities/verifyapi.js';
 import apiKeysRoutes from './routes/keys.js';
 import db from './database/connection.js';
 import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { z } from 'zod';
 
-await migrate(db, { migrationsFolder: 'drizzle' });
+global.bindMomentum = false;
+
+const envSchema = z.object({
+    DB_URI: z.string(),
+    RABBITMQ_URI: z.string(),
+    MOMENTUM_INSTANCE_URL: z.string().url()
+})
+const env = envSchema.parse(process.env)
+console.log(env)
+
+//Do you want to migrate the database? Uncomment this line, be careful though.
+//await migrate(db, { migrationsFolder: 'drizzle' });
 
 const MMPORT = 8080
 const PORT = 3000
@@ -16,6 +31,8 @@ const PORT = 3000
 export const app = new Hono({
     strict: false,
 })
+
+//Middleware for auth
 
 app.use('/api/v1/*', async (c: Context, next) => {
 
@@ -33,6 +50,8 @@ app.use('/api/v1/*', async (c: Context, next) => {
 
 serverRoutes(app)
 apiKeysRoutes(app)
+
+//Websocket Server
 
 const wss = new WebSocketServer({
     port: MMPORT,
@@ -60,27 +79,23 @@ const wss = new WebSocketServer({
 let clients = new Map<string, WebSocket>()
 
 process.on('SIGINT', function () {
-    console.log("Caught interrupt signal");
-
     for (let [id, ws] of clients) {
         ws.close(1008, 'Matchmaker shutting down')
     }
     process.exit();
 })
 
-//on websocket connection, return matchmaker
 wss.on('connection', (ws: WebSocket, req) => {
-
     let id = Math.random().toString(36).substring(7)
     clients.set(id, ws)
-
     return Matchmaker.server(ws, req)
-
 })
 
 wss.on('listening', () => {
     console.log(`Matchmaker listening on port ${MMPORT}`)
 });
+
+//HTTP Server
 
 console.log(`Server listening on port ${PORT}`)
 serve({
