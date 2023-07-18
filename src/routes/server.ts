@@ -63,7 +63,7 @@ function serverRoutes(app: Hono) {
         }, 400)
 
         const serverquery = await db.select().from(servers).where(sql`${servers.id} = ${serverId}`);
-        if (serverquery.length == 0) return c.json({
+        if (serverquery.length === 0) return c.json({
             error: "Server not found"
         }, 404)
         const server = serverquery[0]
@@ -81,7 +81,7 @@ function serverRoutes(app: Hono) {
             data: {
                 playlist: server.playlist,
                 region: server.region,
-                status: status == "gamestarted" ? "offline" : status,
+                status: status === "gamestarted" ? "offline" : status,
                 customkey: customkey,
                 serverid: serverId
             }
@@ -144,7 +144,7 @@ function serverRoutes(app: Hono) {
         const playlist = c.req.param("playlist")
 
         const serverquery = await db.select().from(servers).where(sql`${servers.id} = ${serverId}`);
-        if (serverquery.length == 0) return c.json({
+        if (serverquery.length === 0) return c.json({
             error: "Server not found"
         }, 404)
         const server = serverquery[0]
@@ -186,8 +186,7 @@ function serverRoutes(app: Hono) {
         const customkey = body.customkey || "none"
         const ip = body.ip;
         const port = body.port;
-
-        const regionString = region as string;
+        const regionString = typeof region === 'string' ? region : '';
         const regionEnum = ServerRegion[regionString.toUpperCase()];
 
         const server = {
@@ -215,56 +214,12 @@ function serverRoutes(app: Hono) {
         const serverId = c.req.param("serverId")
 
         const deleteServer = await db.delete(servers).where(sql`${servers.id} = ${serverId}`)
-        if (deleteServer.count == 0) return c.json({
+        if (deleteServer.count === 0) return c.json({
             error: "Server not found"
         }, 404)
 
         return c.json({
             message: `Successfully deleted server ${serverId}`,
-        }, 200)
-
-    });
-
-    app.get("/api/v1/server/:serverId/status", async (c: Context) => {
-
-        const serverquery = await db.select().from(servers).where(sql`${servers.id} = ${c.req.param("serverId")}`)
-        if (serverquery.length == 0) return c.json({
-            error: "Server not found"
-        }, 404)
-        const server = serverquery[0]
-
-        interface MomentumInfo {
-            status: string,
-            version: string
-            uptime: string
-            memoryUsage: string
-            nodeVersion: string
-            platform: string
-            arch: string
-            cpuUsage: string
-            enviroment: string
-        }
-
-        let momentumInfo: MomentumInfo | null = null
-
-        //Weird variable names but I just wrote this at 02:02 AM and I'm tired
-        if (global.bindMomentum == true) {
-
-            const momentumData = await fetch(process.env.MOMENTUM_INSTANCE_URL)
-            if (momentumData.status !== 200) return c.json({
-                error: "Momentum instance is offline"
-            }, 500)
-            const momentumJson = await momentumData.json()
-            momentumInfo = momentumJson
-        }
-
-        return c.json({
-            status: server.status,
-            players: server.players,
-            maxplayers: server.maxplayers,
-            region: server.region,
-            playlist: server.playlist,
-            momentumversion: momentumInfo ? momentumInfo.version : null,
         }, 200)
 
     });

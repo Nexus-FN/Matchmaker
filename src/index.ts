@@ -3,9 +3,9 @@ import dotenv from 'dotenv';
 import { Hono } from 'hono'
 import WebSocket, { WebSocketServer } from 'ws';
 import { z } from 'zod';
+import { clients as mmclients } from './matchmaker.js';
+import("./database/connection.js")
 dotenv.config()
-
-global.bindMomentum = false;
 
 const envSchema = z.object({
     DB_URI: z.string(),
@@ -31,6 +31,10 @@ export const app = new Hono({
     strict: false,
 })
 
+app.get("/api/v1/matchmaker/clients", async (c) => {
+    return c.json(mmclients, 200)
+})
+
 //Middleware for auth
 
 app.use('/api/v1/*', async (c, next) => {
@@ -39,7 +43,7 @@ app.use('/api/v1/*', async (c, next) => {
     if (!apiKey) return c.json({
         error: "Api key missing"
     }, 400)
-    if (await verifyApiKey(apiKey) == false) return c.json({
+    if (await verifyApiKey(apiKey) === false) return c.json({
         error: "Invalid api key"
     }, 401)
 
@@ -94,7 +98,6 @@ wss.on('connection', (ws: WebSocket, req) => {
 wss.on('listening', () => {
     console.log(`Matchmaker listening on port ${MMPORT}`)
 });
-
 //HTTP Server
 
 console.log(`Server listening on port ${PORT}`)

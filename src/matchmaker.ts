@@ -5,16 +5,19 @@ import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from 'uuid';
 import WebSocket from 'ws';
 import { z } from "zod";
+import { IncomingMessage } from "http";
 
 import db from './database/connection.js';
 import { servers, Server } from './database/schema.js';
 import { ServerStatus } from './routes/server.js';
 import { channel } from "./utilities/rabbitmq.js";
+import SkiddedVersion from "./skidding/version.js";
 
 type Client = {
     accountId: string,
     playlist: string,
     region: string,
+    season: number,
     socket: object
     joinTime: Date,
     ticketId: string,
@@ -24,16 +27,21 @@ type Client = {
     preventmessage: boolean,
 }
 
-const clientsMap = new Map();
+export const clients = new Map();
 
 class Matchmaker {
 
-    // Create a map to store clients
-    clients = clientsMap;
+    public async server(ws: WebSocket, req: IncomingMessage) {
 
-    public async server(ws: WebSocket, req: Request) {
+        for (const client of clients.values()) {
+            console.log(client.accountId)
+        }
 
-        const auth = req.headers.get('authorization');
+        const { season } = SkiddedVersion.getVersionInfo(req)
+        if (season) return ws.close(1008, 'invalid_payload');
+
+        if (!req.headers) return ws.close(1008, 'invalid_payload');
+        const auth = req.headers['authorization'];
         // Handle unauthorized connection
         if (auth === undefined || auth === null) {
             return ws.close();
@@ -72,7 +80,7 @@ class Matchmaker {
 
         if (new Date(currentTime).getTime() - new Date(decryptedSchema.parse(JSON.parse(decrypted)).timestamp).getTime() > 5000) return ws.close(1008, 'timestamp_expired');
 
-        if (this.clients.has(decryptedData.data.accountId)) return ws.close(1008, 'already_queued');
+        if (clients.has(decryptedData.data.accountId)) return ws.close(1008, 'already_queued');
 
         const { playlist, accountId, region, customkey, priority } = decryptedData.data;
 
@@ -83,12 +91,13 @@ class Matchmaker {
         const tenMinutesAgo = new Date();
         tenMinutesAgo.setMinutes(tenMinutesAgo.getMinutes() - 10);
 
-        console.log(`New client: ${accountId} - ${playlist} - ${region} - ${customkey} - ${priority}`)
+        console.log(`New client: ${accountId} - ${playlist} - ${region} - ${customkey} - ${priority} - ${season}`)
 
         const clientInfo: Client = {
             accountId: accountId,
             playlist: playlist,
             region: region,
+            season: season,
             socket: ws,
             joinTime: priority ? tenMinutesAgo : currentTime,
             ticketId: ticketId,
@@ -98,9 +107,9 @@ class Matchmaker {
             preventmessage: false,
         }
 
-        this.clients.set(accountId, clientInfo);
+        clients.set(accountId, clientInfo);
 
-        this.queueNewClients(playlist, region, customkey, ws);
+        this.queueNewClients(playlist, region, customkey, season, ws);
 
         // Consume messages from RabbitMQ
         channel.consume("matchmaker", async (msg: Message | null) => {
@@ -109,13 +118,14 @@ class Matchmaker {
                 switch (message.action) {
                     case 'UPDATE': {
 
-                        await this.queued(message.data.playlist, message.data.region, message.data.customkey);
+                        await this.queued(message.data.playlist, message.data.region, message.data.customkey, season);
 
                         const serverquery = await db.select().from(servers).where(
                             and(
                                 eq(servers.playlist, message.data.playlist),
                                 eq(servers.region, message.data.region),
                                 eq(servers.customkey, message.data.customkey),
+                                eq(servers.season, season),
                                 eq(servers.status, ServerStatus.ONLINE)
                             )
                         );
@@ -124,11 +134,12 @@ class Matchmaker {
 
                         if (message.data.type === "CLOSE") return;
 
-                        const sortedClients = Array.from(this.clients.values())
+                        const sortedClients = Array.from(clients.values())
                             .filter(value =>
                                 value.playlist === server.playlist
                                 && value.region === server.region
                                 && value.customkey === server.customkey
+                                && value.season === server.season
                                 && value.preventmessage === false)
                             .sort((a: Client, b: Client) => a.joinTime.getTime() - b.joinTime.getTime())
                             .slice(0, server.maxplayers as number);
@@ -148,11 +159,12 @@ class Matchmaker {
 
                             const data = message.data;
 
-                            const sortedClients = Array.from(this.clients.values())
+                            const sortedClients = Array.from(clients.values())
                                 .filter(value =>
-                                    value.playlist === data.playlist
-                                    && value.region === data.region
-                                    && value.customkey === data.customkey
+                                    value.playlist === server.playlist
+                                    && value.region === server.region
+                                    && value.customkey === server.customkey
+                                    && value.season === server.season
                                     && value.preventmessage === false)
                                 .sort((a: Client, b: Client) => a.joinTime.getTime() - b.joinTime.getTime())
 
@@ -161,6 +173,7 @@ class Matchmaker {
                                     eq(servers.playlist, message.data.playlist),
                                     eq(servers.region, message.data.region),
                                     eq(servers.customkey, message.data.customkey),
+                                    eq(servers.season, season),
                                     eq(servers.status, ServerStatus.ONLINE)
                                 )
                             )
@@ -191,12 +204,12 @@ class Matchmaker {
         }, { noAck: false });
 
         ws.on('close', () => {
-            const deleted = this.clients.delete(accountId)
+            const deleted = clients.delete(accountId)
             if (!deleted) return;
             const msg = {
                 action: 'UPDATE',
                 data: {
-                    clientAmount: this.clients.size,
+                    clientAmount: clients.size,
                     region: region,
                     playlist: playlist,
                     customkey: customkey,
@@ -208,9 +221,9 @@ class Matchmaker {
 
     }
 
-    private async queueNewClients(playlistarg: string, regionarg: string, customkeyarg: string, websocket: WebSocket) {
+    private async queueNewClients(playlistarg: string, regionarg: string, customkeyarg: string, seasonarg: number, websocket: WebSocket) {
 
-        const sortedClients = Array.from(this.clients.values())
+        const sortedClients = Array.from(clients.values())
             .filter(value => value.playlist === playlistarg && value.region === regionarg && value.customkey === customkeyarg)
 
         const msg = {
@@ -220,13 +233,14 @@ class Matchmaker {
                 region: regionarg,
                 playlist: playlistarg,
                 customkey: customkeyarg,
+                season: seasonarg,
                 type: 'NEW'
             },
         };
 
         this.connecting(websocket);
 
-        this.waiting(this.clients.size, playlistarg, regionarg, customkeyarg, websocket);
+        this.waiting(clients.size, playlistarg, regionarg, customkeyarg, seasonarg, websocket);
 
         channel.sendToQueue('matchmaker', Buffer.from(JSON.stringify(msg)))
     }
@@ -242,12 +256,13 @@ class Matchmaker {
         );
     }
 
-    private async waiting(players: number, playlist: string, regionarg: string, customkeyarg: string, ws: WebSocket) {
+    private async waiting(players: number, playlist: string, regionarg: string, customkeyarg: string, seasonarg: number, ws: WebSocket) {
 
-        const sortedClients = Array.from(this.clients.values())
+        const sortedClients = Array.from(clients.values())
             .filter(value => value.playlist === playlist
                 && value.region === regionarg
-                && value.customkey === customkeyarg)
+                && value.customkey === customkeyarg
+                && value.season === seasonarg)
 
         ws.send(
             JSON.stringify({
@@ -261,11 +276,12 @@ class Matchmaker {
         );
     }
 
-    private async queued(playlistarg: string, regionarg: string, customkeyarg: string) {
-        const sortedClients = Array.from(this.clients.values())
+    private async queued(playlistarg: string, regionarg: string, customkeyarg: string, seasonarg: number) {
+        const sortedClients = Array.from(clients.values())
             .filter(client => client.playlist === playlistarg
                 && client.region === regionarg
                 && client.customkey === customkeyarg
+                && client.season === seasonarg
                 && !client.preventmessage)
             .sort((a: Client, b: Client) => a.joinTime.getTime() - b.joinTime.getTime())
 

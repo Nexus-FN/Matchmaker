@@ -33,6 +33,7 @@ export const servers = pgTable('servers', {
     status: varchar('status', { length: 256 }),
     maxplayers: integer('maxplayers'),
     players: integer('players'),
+    season: integer('seasonint'),
     customkey: varchar('customkey', { length: 256 }),
     ip: varchar('ip', { length: 256 }),
     port: integer('port'),
