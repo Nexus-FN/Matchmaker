@@ -31,12 +31,11 @@ class Matchmaker {
     // Create a map to store clients
     clients = clientsMap;
 
-    public async server(ws: WebSocket, req) {
+    public async server(ws: WebSocket, req: Request) {
 
-        const auth = req.headers['authorization']
-
+        const auth = req.headers.get('authorization');
         // Handle unauthorized connection
-        if (auth == undefined) {
+        if (auth === undefined || auth === null) {
             return ws.close();
         }
 
@@ -110,7 +109,7 @@ class Matchmaker {
                 switch (message.action) {
                     case 'UPDATE': {
 
-                        await this.Queued(message.data.playlist, message.data.region, message.data.customkey);
+                        await this.queued(message.data.playlist, message.data.region, message.data.customkey);
 
                         const serverquery = await db.select().from(servers).where(
                             and(
@@ -120,10 +119,10 @@ class Matchmaker {
                                 eq(servers.status, ServerStatus.ONLINE)
                             )
                         );
-                        if (serverquery.length == 0) return
+                        if (serverquery.length === 0) return
                         const server = serverquery[0] as Server;
 
-                        if (message.data.type == "CLOSE") return;
+                        if (message.data.type === "CLOSE") return;
 
                         const sortedClients = Array.from(this.clients.values())
                             .filter(value =>
@@ -132,12 +131,12 @@ class Matchmaker {
                                 && value.customkey === server.customkey
                                 && value.preventmessage === false)
                             .sort((a: Client, b: Client) => a.joinTime.getTime() - b.joinTime.getTime())
-                            .slice(0, server.maxplayers!);
+                            .slice(0, server.maxplayers as number);
 
-                        this.SessionAssignment(sortedClients, server);
+                        this.sessionAssignment(sortedClients, server);
 
                         setTimeout(async () => {
-                            this.Join(sortedClients, server);
+                            this.join(sortedClients, server);
                         }, 200);
 
                         break;
@@ -165,14 +164,14 @@ class Matchmaker {
                                     eq(servers.status, ServerStatus.ONLINE)
                                 )
                             )
-                            if (serverquery.length == 0) return;
+                            if (serverquery.length === 0) return;
                             const server = serverquery[0] as Server;
 
                             setTimeout(async () => {
-                                this.SessionAssignment(sortedClients, server);
+                                this.sessionAssignment(sortedClients, server);
 
                                 setTimeout(async () => {
-                                    this.Join(sortedClients, server);
+                                    this.join(sortedClients, server);
                                 }, 200);
                             }, 100);
                             break;
@@ -225,14 +224,14 @@ class Matchmaker {
             },
         };
 
-        this.Connecting(websocket);
+        this.connecting(websocket);
 
-        this.Waiting(this.clients.size, playlistarg, regionarg, customkeyarg, websocket);
+        this.waiting(this.clients.size, playlistarg, regionarg, customkeyarg, websocket);
 
         channel.sendToQueue('matchmaker', Buffer.from(JSON.stringify(msg)))
     }
 
-    private async Connecting(ws: WebSocket) {
+    private async connecting(ws: WebSocket) {
         ws.send(
             JSON.stringify({
                 payload: {
@@ -243,7 +242,7 @@ class Matchmaker {
         );
     }
 
-    private async Waiting(players: number, playlist: string, regionarg: string, customkeyarg: string, ws: WebSocket) {
+    private async waiting(players: number, playlist: string, regionarg: string, customkeyarg: string, ws: WebSocket) {
 
         const sortedClients = Array.from(this.clients.values())
             .filter(value => value.playlist === playlist
@@ -262,7 +261,7 @@ class Matchmaker {
         );
     }
 
-    private async Queued(playlistarg: string, regionarg: string, customkeyarg: string) {
+    private async queued(playlistarg: string, regionarg: string, customkeyarg: string) {
         const sortedClients = Array.from(this.clients.values())
             .filter(client => client.playlist === playlistarg
                 && client.region === regionarg
@@ -291,8 +290,8 @@ class Matchmaker {
         }
     }
 
-    private async SessionAssignment(sortedClients: Client[], serverArg: Server) {
-        if (!serverArg || serverArg.maxplayers == undefined || serverArg.players == undefined) return;
+    private async sessionAssignment(sortedClients: Client[], serverArg: Server) {
+        if (!serverArg || serverArg.maxplayers === undefined || serverArg.players === undefined || serverArg.players === null || serverArg.maxplayers === null) return;
         if (serverArg.players >= serverArg.maxplayers) return;
 
         let playerCount = 0;
@@ -316,9 +315,9 @@ class Matchmaker {
         }
     }
 
-    private async Join(sortedClients: Client[], serverArg: Server) {
+    private async join(sortedClients: Client[], serverArg: Server) {
 
-        if (!serverArg || serverArg.maxplayers == undefined || serverArg.players == undefined) return;
+        if (!serverArg || serverArg.maxplayers === undefined || serverArg.players === undefined || serverArg.players === null || serverArg.maxplayers === null) return;
 
         if (serverArg.players >= serverArg.maxplayers) return;
 

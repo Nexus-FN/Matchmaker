@@ -1,0 +1,36 @@
+{
+    "$schema": "https://docs.rome.tools/schemas/12.1.3/schema.json",
+    "organizeImports": {
+        "enabled": false
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": true,
+            "style": {
+                "noUnusedTemplateLiteral": "warn"
+            },
+            "correctness": {
+                "noUnusedVariables": "warn"
+            },
+            "suspicious": {
+                "noExplicitAny": "off"
+            },
+            "nursery": {
+                "noBannedTypes": "warn",
+                "noForEach": "warn",
+                "useCamelCase": "warn"
+            }
+        }
+    },
+    "formatter": {
+        "enabled": true,
+        "formatWithErrors": false,
+        "indentStyle": "tab",
+        "indentSize": 2,
+        "lineWidth": 320,
+        "ignore": [
+            "node_modules/**/*"
+        ]
+    }
+}
