@@ -11,5 +11,4 @@ const connection: Connection = await connect(
 
 export const channel: Channel = await connection.createChannel()
 
-await channel.assertQueue('matchmaker')
 await channel.purgeQueue('matchmaker')

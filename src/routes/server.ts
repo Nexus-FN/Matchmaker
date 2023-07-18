@@ -18,7 +18,7 @@ export enum ServerRegion {
     OCE = "OCE",
 }
 
-function determinePicture(serverStatus: ServerStatus): string {
+/*function determinePicture(serverStatus: ServerStatus): string {
 
     switch (serverStatus) {
         case ServerStatus.ONLINE:
@@ -31,9 +31,9 @@ function determinePicture(serverStatus: ServerStatus): string {
             return "https://static.wikia.nocookie.net/fortnite/images/1/1e/VictoryRoyaleSlate.png/revision/latest?cb=20220329154427"
     }
 
-}
+}*/
 
-function determineTitle(serverStatus: ServerStatus, serverId: string): string {
+/* function determineTitle(serverStatus: ServerStatus, serverId: string): string {
 
     switch (serverStatus) {
         case ServerStatus.ONLINE:
@@ -46,7 +46,7 @@ function determineTitle(serverStatus: ServerStatus, serverId: string): string {
             return `Server ${serverId}'s round has ended. GG!`
     }
 
-}
+} */
 
 function serverRoutes(app: Hono) {
 
@@ -91,7 +91,7 @@ function serverRoutes(app: Hono) {
 
         channel.sendToQueue("matchmaker", Buffer.from(JSON.stringify(msg)))
 
-        const formattedPlaylist = server.playlist!.toLowerCase().replace("playlist_default", "").replace("_", " ").toUpperCase()
+        /*const formattedPlaylist = server.playlist!.toLowerCase().replace("playlist_default", "").replace("_", " ").toUpperCase()
 
         const webhook = await fetch("https://discord.com/api/webhooks/1129469545959137402/rWoZxcdihnfr-AnyYiq0s5IRPxzYx4cYE143okLf7_MugFr3N0QrNbbkS1zPUW9D5I9p", {
             method: "POST",
@@ -130,7 +130,7 @@ function serverRoutes(app: Hono) {
         })
         if (webhook.status !== 204) return c.json({
             error: "Webhook failed"
-        }, 500)
+        }, 500)*/
 
         return c.json({
             message: `Set server ${serverId} status to ${statusEnum}`

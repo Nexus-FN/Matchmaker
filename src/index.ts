@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { Hono } from 'hono'
 import WebSocket, { WebSocketServer } from 'ws';
 import { z } from 'zod';
+import { prettyJSON } from 'hono/pretty-json'
 dotenv.config()
 
 global.bindMomentum = false;
@@ -56,7 +57,6 @@ const wss = new WebSocketServer({
     port: MMPORT,
     perMessageDeflate: {
         zlibDeflateOptions: {
-            // See zlib defaults.
             chunkSize: 1024,
             memLevel: 7,
             level: 3
@@ -64,21 +64,18 @@ const wss = new WebSocketServer({
         zlibInflateOptions: {
             chunkSize: 10 * 1024
         },
-        // Other options settable:
-        clientNoContextTakeover: true, // Defaults to negotiated value.
-        serverNoContextTakeover: true, // Defaults to negotiated value.
-        serverMaxWindowBits: 10, // Defaults to negotiated value.
-        // Below options specified as default values.
-        concurrencyLimit: 10, // Limits zlib concurrency for perf.
-        threshold: 1024 // Size (in bytes) below which messages
-        // should not be compressed if context takeover is disabled.
+        clientNoContextTakeover: true,
+        serverNoContextTakeover: true,
+        serverMaxWindowBits: 10,
+        concurrencyLimit: 10,
+        threshold: 1024
     }
 });
 
-const clients = new Map<string, WebSocket>()
+const wsclients = new Map<string, WebSocket>()
 
 process.on('SIGINT', function () {
-    for (const [id, ws] of clients) {
+    for (const [id, ws] of wsclients) {
         if (!id) continue;
         ws.close(1008, 'Matchmaker shutting down')
     }
@@ -87,7 +84,7 @@ process.on('SIGINT', function () {
 
 wss.on('connection', (ws: WebSocket, req) => {
     const id = Math.random().toString(36).substring(7)
-    clients.set(id, ws)
+    wsclients.set(id, ws)
     return Matchmaker.server(ws, req)
 })
 
@@ -96,6 +93,28 @@ wss.on('listening', () => {
 });
 
 //HTTP Server
+
+app.use('*', prettyJSON()) // With options: prettyJSON({ space: 4 })
+
+app.get("/clients/:region/:playlist/:customkey", async (c) => {
+
+    const region = c.req.param("region");
+    const playlist = c.req.param("playlist");
+    const customkey = c.req.param("customkey");
+
+    const clients = Matchmaker.clients;
+
+    const sortedClients = Array.from(clients.values())
+        .filter(value =>
+            value.playlist === playlist
+            && value.region === region
+            && value.customkey === customkey
+            && value.preventmessage === false)
+        .sort((a, b) => a.joinTime - b.joinTime);
+
+    return c.json(sortedClients);
+
+});
 
 console.log(`Server listening on port ${PORT}`)
 serve({

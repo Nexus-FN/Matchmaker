@@ -1,7 +1,6 @@
 import { setTimeout } from "timers";
-
 import { AES256Encryption } from '@ryanbekhen/cryptkhen';
-import { Message } from 'amqplib/callback_api'
+import { Message } from 'amqplib/callback_api';
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from 'uuid';
 import WebSocket from 'ws';
@@ -17,7 +16,7 @@ type Client = {
     playlist: string,
     region: string,
     socket: object
-    joinTime: string,
+    joinTime: Date,
     ticketId: string,
     matchId: string,
     sessionId: string,
@@ -34,8 +33,6 @@ class Matchmaker {
 
     public async server(ws: WebSocket, req) {
 
-        const clients = this.clients;
-
         const auth = req.headers['authorization']
 
         // Handle unauthorized connection
@@ -49,7 +46,7 @@ class Matchmaker {
 
         let decrypted: string;
 
-        const currentTime = new Date().toISOString();
+        const currentTime = new Date();
 
         const aes256 = new AES256Encryption("test");
 
@@ -86,14 +83,15 @@ class Matchmaker {
 
         const tenMinutesAgo = new Date();
         tenMinutesAgo.setMinutes(tenMinutesAgo.getMinutes() - 10);
-        const tenMinutesAgoISO = tenMinutesAgo.toISOString();
+
+        console.log(`New client: ${accountId} - ${playlist} - ${region} - ${customkey} - ${priority}`)
 
         const clientInfo: Client = {
             accountId: accountId,
             playlist: playlist,
             region: region,
             socket: ws,
-            joinTime: priority ? tenMinutesAgoISO : currentTime,
+            joinTime: priority ? tenMinutesAgo : currentTime,
             ticketId: ticketId,
             matchId: matchId,
             sessionId: sessionId,
@@ -103,7 +101,7 @@ class Matchmaker {
 
         this.clients.set(accountId, clientInfo);
 
-        queueNewClients(playlist, region, customkey);
+        this.queueNewClients(playlist, region, customkey, ws);
 
         // Consume messages from RabbitMQ
         channel.consume("matchmaker", async (msg: Message | null) => {
@@ -112,7 +110,7 @@ class Matchmaker {
                 switch (message.action) {
                     case 'UPDATE': {
 
-                        await Queued(message.data.playlist, message.data.region, message.data.customkey);
+                        await this.Queued(message.data.playlist, message.data.region, message.data.customkey);
 
                         const serverquery = await db.select().from(servers).where(
                             and(
@@ -127,19 +125,19 @@ class Matchmaker {
 
                         if (message.data.type == "CLOSE") return;
 
-                        const sortedClients = Array.from(clients.values())
+                        const sortedClients = Array.from(this.clients.values())
                             .filter(value =>
                                 value.playlist === server.playlist
                                 && value.region === server.region
                                 && value.customkey === server.customkey
                                 && value.preventmessage === false)
-                            .sort((a, b) => a.joinTime - b.joinTime)
+                            .sort((a: Client, b: Client) => a.joinTime.getTime() - b.joinTime.getTime())
                             .slice(0, server.maxplayers!);
 
-                        SessionAssignment(sortedClients, server);
+                        this.SessionAssignment(sortedClients, server);
 
                         setTimeout(async () => {
-                            Join(sortedClients, server);
+                            this.Join(sortedClients, server);
                         }, 200);
 
                         break;
@@ -147,19 +145,17 @@ class Matchmaker {
                     case 'STATUS': {
 
                         try {
-                            if (message.data.status !== 'online') {
-                                return;
-                            }
+                            if (message.data.status !== 'online') return;
 
                             const data = message.data;
 
-                            const sortedClients = Array.from(clients.values())
+                            const sortedClients = Array.from(this.clients.values())
                                 .filter(value =>
                                     value.playlist === data.playlist
                                     && value.region === data.region
                                     && value.customkey === data.customkey
                                     && value.preventmessage === false)
-                                .sort((a, b) => a.joinTime - b.joinTime);
+                                .sort((a: Client, b: Client) => a.joinTime.getTime() - b.joinTime.getTime())
 
                             const serverquery = await db.select().from(servers).where(
                                 and(
@@ -173,10 +169,10 @@ class Matchmaker {
                             const server = serverquery[0] as Server;
 
                             setTimeout(async () => {
-                                SessionAssignment(sortedClients, server);
+                                this.SessionAssignment(sortedClients, server);
 
                                 setTimeout(async () => {
-                                    Join(sortedClients, server);
+                                    this.Join(sortedClients, server);
                                 }, 200);
                             }, 100);
                             break;
@@ -193,7 +189,7 @@ class Matchmaker {
                 //console.log(message)
                 channel.ack(msg)
             }
-        })
+        }, { noAck: false });
 
         ws.on('close', () => {
             const deleted = this.clients.delete(accountId)
@@ -211,141 +207,146 @@ class Matchmaker {
             channel.sendToQueue('matchmaker', Buffer.from(JSON.stringify(msg)))
         });
 
-        async function queueNewClients(playlistarg: string, regionarg: string, customkeyarg: string) {
+    }
 
-            const sortedClients = Array.from(clients.values())
-                .filter(value => value.playlist === playlist && value.region === regionarg && value.customkey === customkeyarg)
+    private async queueNewClients(playlistarg: string, regionarg: string, customkeyarg: string, websocket: WebSocket) {
 
-            const msg = {
-                action: 'UPDATE',
-                data: {
-                    clientAmount: sortedClients.length,
-                    region: regionarg,
-                    playlist: playlist,
-                    customkey: customkeyarg,
-                    type: 'NEW'
+        const sortedClients = Array.from(this.clients.values())
+            .filter(value => value.playlist === playlistarg && value.region === regionarg && value.customkey === customkeyarg)
+
+        const msg = {
+            action: 'UPDATE',
+            data: {
+                clientAmount: sortedClients.length,
+                region: regionarg,
+                playlist: playlistarg,
+                customkey: customkeyarg,
+                type: 'NEW'
+            },
+        };
+
+        this.Connecting(websocket);
+
+        this.Waiting(this.clients.size, playlistarg, regionarg, customkeyarg, websocket);
+
+        channel.sendToQueue('matchmaker', Buffer.from(JSON.stringify(msg)))
+    }
+
+    private async Connecting(ws: WebSocket) {
+        ws.send(
+            JSON.stringify({
+                payload: {
+                    state: "Connecting",
                 },
-            };
+                name: "StatusUpdate",
+            }),
+        );
+    }
 
-            Connecting();
+    private async Waiting(players: number, playlist: string, regionarg: string, customkeyarg: string, ws: WebSocket) {
 
-            Waiting(clients.size, playlist, region, customkey);
+        const sortedClients = Array.from(this.clients.values())
+            .filter(value => value.playlist === playlist
+                && value.region === regionarg
+                && value.customkey === customkeyarg)
 
-            channel.sendToQueue('matchmaker', Buffer.from(JSON.stringify(msg)))
-        }
+        ws.send(
+            JSON.stringify({
+                payload: {
+                    totalPlayers: players,
+                    connectedPlayers: sortedClients.length,
+                    state: "Waiting",
+                },
+                name: "StatusUpdate",
+            }),
+        );
+    }
 
-        async function Connecting() {
-            //console.log(`Connecting. TicketId: ${ticketId}`);
-            // Send a "Connecting" status update to the client
-            ws.send(
+    private async Queued(playlistarg: string, regionarg: string, customkeyarg: string) {
+        const sortedClients = Array.from(this.clients.values())
+            .filter(client => client.playlist === playlistarg
+                && client.region === regionarg
+                && client.customkey === customkeyarg
+                && !client.preventmessage)
+            .sort((a: Client, b: Client) => a.joinTime.getTime() - b.joinTime.getTime())
+
+        for (const client of sortedClients) {
+
+            const queuedPlayers = sortedClients.length;
+            const estimatedWaitSec = queuedPlayers * 2;
+            const status = queuedPlayers === 0 ? 2 : 3;
+
+            (client.socket as WebSocket).send(
                 JSON.stringify({
                     payload: {
-                        state: "Connecting",
+                        ticketId: client.ticketId,
+                        queuedPlayers,
+                        estimatedWaitSec,
+                        status,
+                        state: "Queued",
                     },
                     name: "StatusUpdate",
                 }),
             );
         }
+    }
 
-        async function Waiting(players: number, playlist: string, regionarg: string, customkeyarg: string) {
-            //console.log(`Waiting.`);
-            // Send a "Waiting" status update to the client with the total number of players
+    private async SessionAssignment(sortedClients: Client[], serverArg: Server) {
+        if (!serverArg || serverArg.maxplayers == undefined || serverArg.players == undefined) return;
+        if (serverArg.players >= serverArg.maxplayers) return;
 
-            const sortedClients = Array.from(clients.values())
-                .filter(value => value.playlist === playlist
-                    && value.region === regionarg
-                    && value.customkey === customkeyarg)
+        let playerCount = 0;
 
-            ws.send(
+        for (const [index, client] of sortedClients.entries()) {
+            if (index >= serverArg.maxplayers) break;
+
+            if (playerCount >= serverArg.maxplayers) break;
+
+            (client.socket as WebSocket).send(
                 JSON.stringify({
                     payload: {
-                        totalPlayers: players,
-                        connectedPlayers: sortedClients.length,
-                        state: "Waiting",
+                        matchId: client.matchId,
+                        state: "SessionAssignment",
                     },
                     name: "StatusUpdate",
                 }),
             );
+
+            playerCount++;
+        }
+    }
+
+    private async Join(sortedClients: Client[], serverArg: Server) {
+
+        if (!serverArg || serverArg.maxplayers == undefined || serverArg.players == undefined) return;
+
+        if (serverArg.players >= serverArg.maxplayers) return;
+
+        const maxPlayers = Math.min(serverArg.maxplayers, sortedClients.length);
+        const clientsToJoin = sortedClients.slice(0, maxPlayers);
+
+        for (const [index, client] of clientsToJoin.entries()) {
+            if (index >= maxPlayers) break;
+
+            if (serverArg.players >= serverArg.maxplayers) break;
+            client.preventmessage = true;
+
+            (client.socket as WebSocket).send(
+                JSON.stringify({
+                    payload: {
+                        matchId: client.matchId,
+                        sessionId: client.sessionId,
+                        joinDelaySec: 1,
+                    },
+                    name: "Play",
+                })
+            );
+            serverArg.players++;
         }
 
-        async function Queued(playlistarg: string, regionarg: string, customkeyarg: string) {
-
-            const sortedClients = Array.from(clients.values())
-                .filter(value => value.playlist === playlistarg
-                    && value.region === regionarg
-                    && value.customkey === customkeyarg
-                    && value.preventmessage === false)
-                .sort((a, b) => a.joinTime - b.joinTime);
-
-            for (const client of sortedClients) {
-                if (client.preventmessage === true) continue;
-                (client.socket as WebSocket).send(
-                    JSON.stringify({
-                        payload: {
-                            ticketId: client.ticketId,
-                            queuedPlayers: sortedClients.length,
-                            estimatedWaitSec: sortedClients.length * 2,
-                            status: sortedClients.length == 0 ? 2 : 3,
-                            state: "Queued",
-                        },
-                        name: "StatusUpdate",
-                    }),
-                );
-            }
-        }
-
-        async function SessionAssignment(sortedClients: Client[], serverarg: Server) {
-            for (const [index, client] of sortedClients.entries()) {
-
-                if (!serverarg) return;
-                if (serverarg.maxplayers == undefined || serverarg.players == undefined) return;
-
-                if (serverarg.players >= serverarg.maxplayers) return;
-
-                if (index >= serverarg.maxplayers) return;
-
-                (client.socket as WebSocket).send(
-                    JSON.stringify({
-                        payload: {
-                            matchId: client.matchId,
-                            state: "SessionAssignment",
-                        },
-                        name: "StatusUpdate",
-                    }),
-                );
-            }
-        }
-
-        async function Join(sortedClients: Client[], serverarg: Server) {
-            if (!serverarg) return;
-            if (serverarg.maxplayers == undefined || serverarg.players == undefined) return;
-
-            if (serverarg.players >= serverarg.maxplayers) return;
-
-            if (serverarg.maxplayers === null) return;
-            if (serverarg.players >= serverarg.maxplayers) return;
-            const maxPlayers = Math.min(serverarg.maxplayers, sortedClients.length);
-            const clientsToJoin = sortedClients.slice(0, maxPlayers);
-
-            for (const [index, client] of clientsToJoin.entries()) {
-                if (!index) continue;
-                if (serverarg.players >= serverarg.maxplayers) break;
-                client.preventmessage = true;
-
-                (client.socket as WebSocket).send(
-                    JSON.stringify({
-                        payload: {
-                            matchId: client.matchId,
-                            sessionId: client.sessionId,
-                            joinDelaySec: 1,
-                        },
-                        name: "Play",
-                    })
-                );
-
-                serverarg.players++;
-            }
-        }
+        await db.update(servers).set({
+            players: serverArg.players
+        }).where(eq(servers.id, serverArg.id));
     }
 }
 
