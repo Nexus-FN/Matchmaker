@@ -19,7 +19,7 @@
     "amqplib": "^0.10.3",
     "dirname-filename-esm": "^1.1.1",
     "dotenv": "^16.3.1",
-    "drizzle-orm": "^0.27.2",
+    "drizzle-orm": "^0.28.5",
     "hono": "^3.3.0",
     "mysql2": "^3.5.2",
     "pg": "^8.11.1",
