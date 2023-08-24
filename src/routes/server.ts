@@ -2,20 +2,20 @@ import { sql } from "drizzle-orm";
 import { Context, Hono } from "hono";
 
 import db from "../database/connection.js";
-import { servers } from "../database/schema.js";
+import { NewServer, servers } from "../database/schema.js";
 import { channel } from "../utilities/rabbitmq.js";
 
 export enum ServerStatus {
-    ONLINE = "online",
-    OFFLINE = "offline",
-    GAMESTARTED = "gamestarted",
-    GAMEENDED = "gamenended"
+	ONLINE = "online",
+	OFFLINE = "offline",
+	GAMESTARTED = "gamestarted",
+	GAMEENDED = "gamenended",
 }
 
 export enum ServerRegion {
-    NAE = "NAE",
-    EU = "EU",
-    OCE = "OCE",
+	NAE = "NAE",
+	EU = "EU",
+	OCE = "OCE",
 }
 
 /*function determinePicture(serverStatus: ServerStatus): string {
@@ -49,49 +49,56 @@ export enum ServerRegion {
 } */
 
 function serverRoutes(app: Hono) {
+	app.post("/api/v1/server/status/:serverId/:status", async (c: Context) => {
+		let customkey = c.req.query("customkey");
+		if (!customkey) customkey = "none";
 
-    app.post("/api/v1/server/status/:serverId/:status", async (c: Context) => {
+		const serverId = c.req.param("serverId");
+		const status = c.req.param("status");
 
-        let customkey = c.req.query("customkey")
-        if (!customkey) customkey = "none"
+		if (status !== "online" && status !== "offline" && status !== "gamestarted" && status !== "gameended")
+			return c.json(
+				{
+					error: "Status missing",
+				},
+				400,
+			);
 
-        const serverId = c.req.param("serverId");
-        const status = c.req.param("status")
+		const serverquery = await db.select().from(servers).where(sql`${servers.id} = ${serverId}`);
+		if (serverquery.length === 0)
+			return c.json(
+				{
+					error: "Server not found",
+				},
+				404,
+			);
+		const server = serverquery[0];
 
-        if (status !== "online" && status !== "offline" && status !== "gamestarted" && status !== "gameended") return c.json({
-            error: "Status missing"
-        }, 400)
+		const statusString = status as string;
+		const statusEnum = ServerStatus[statusString.toUpperCase()];
 
-        const serverquery = await db.select().from(servers).where(sql`${servers.id} = ${serverId}`);
-        if (serverquery.length === 0) return c.json({
-            error: "Server not found"
-        }, 404)
-        const server = serverquery[0]
+		server.status = statusEnum;
+		server.players = 0;
 
-        const statusString = status as string;
-        const statusEnum = ServerStatus[statusString.toUpperCase()];
+		await db.update(servers).set(server).where(sql`${servers.id} = ${serverId}`);
 
-        server.status = statusEnum
-        server.players = 0
+		const msg = {
+			action: "STATUS",
+			data: {
+				playlist: server.playlist,
+				region: server.region,
+				status: status === "gamestarted" ? "offline" : status,
+				customkey: customkey,
+				serverid: serverId,
+				season: server.season,
+			},
+		};
 
-        await db.update(servers).set(server).where(sql`${servers.id} = ${serverId}`)
+		console.log(msg);
 
-        const msg = {
-            action: "STATUS",
-            data: {
-                playlist: server.playlist,
-                region: server.region,
-                status: status === "gamestarted" ? "offline" : status,
-                customkey: customkey,
-                serverid: serverId
-            }
-        }
+		channel.sendToQueue("matchmaker", Buffer.from(JSON.stringify(msg)));
 
-        console.log(msg)
-
-        channel.sendToQueue("matchmaker", Buffer.from(JSON.stringify(msg)))
-
-        /*const formattedPlaylist = server.playlist!.toLowerCase().replace("playlist_default", "").replace("_", " ").toUpperCase()
+		/*const formattedPlaylist = server.playlist!.toLowerCase().replace("playlist_default", "").replace("_", " ").toUpperCase()
 
         const webhook = await fetch("https://discord.com/api/webhooks/1129469545959137402/rWoZxcdihnfr-AnyYiq0s5IRPxzYx4cYE143okLf7_MugFr3N0QrNbbkS1zPUW9D5I9p", {
             method: "POST",
@@ -132,98 +139,96 @@ function serverRoutes(app: Hono) {
             error: "Webhook failed"
         }, 500)*/
 
-        return c.json({
-            message: `Set server ${serverId} status to ${statusEnum}`
-        }, 200)
+		return c.json(
+			{
+				message: `Set server ${serverId} status to ${statusEnum}`,
+			},
+			200,
+		);
+	});
 
-    });
+	app.post("/api/v1/server/playlist/:serverId/:playlist", async (c: Context) => {
+		const serverId = c.req.param("serverId");
+		const playlist = c.req.param("playlist");
 
-    app.post("/api/v1/server/playlist/:serverId/:playlist", async (c: Context) => {
+		const serverquery = await db.select().from(servers).where(sql`${servers.id} = ${serverId}`);
+		if (serverquery.length === 0)
+			return c.json(
+				{
+					error: "Server not found",
+				},
+				404,
+			);
+		const server = serverquery[0];
 
-        const serverId = c.req.param("serverId")
-        const playlist = c.req.param("playlist")
+		server.playlist = playlist;
 
-        const serverquery = await db.select().from(servers).where(sql`${servers.id} = ${serverId}`);
-        if (serverquery.length === 0) return c.json({
-            error: "Server not found"
-        }, 404)
-        const server = serverquery[0]
+		await db.update(servers).set(server).where(sql`${servers.id} = ${serverId}`);
 
-        server.playlist = playlist
+		return c.json(
+			{
+				message: "success",
+			},
+			200,
+		);
+	});
 
-        await db.update(servers).set(server).where(sql`${servers.id} = ${serverId}`)
+	app.put("/api/v1/server/create", async (c: Context) => {
+		const body = await c.req.json();
 
-        return c.json({
-            message: "success",
-        }, 200)
+		const parameters = ["serverId", "region", "playlist", "status", "maxPlayers", "players", "ip", "port"];
 
-    });
+		for (const parameter of parameters) {
+			if (!body[parameter])
+				return c.json(
+					{
+						error: `${parameter} missing`,
+					},
+					400,
+				);
+		}
 
-    app.put("/api/v1/server/create", async (c: Context) => {
+		const { region, playlist, maxPlayers, ip, port, season } = body;
 
-        const body = await c.req.json()
+		const customkey = body.customkey || "none";
+		const regionString = typeof region === "string" ? region : "";
+		const regionEnum = ServerRegion[regionString.toUpperCase()];
 
-        const parameters = [
-            "serverId",
-            "region",
-            "playlist",
-            "status",
-            "maxPlayers",
-            "players",
-            "ip",
-            "port"
-        ]
+		const server: NewServer = {
+			region: regionEnum,
+			playlist: playlist,
+			status: ServerStatus.OFFLINE,
+			maxplayers: maxPlayers,
+			players: 0,
+			customkey: customkey,
+			ip: ip,
+			season: season,
+			port: port,
+		};
 
-        for (const parameter of parameters) {
-            if (!body[parameter]) return c.json({
-                error: `${parameter} missing`
-            }, 400)
-        }
+		await db.insert(servers).values(server);
 
-        const region = body.region
-        const playlist = body.playlist
-        const maxPlayers = body.maxPlayers
-        const customkey = body.customkey || "none"
-        const ip = body.ip;
-        const port = body.port;
-        const regionString = typeof region === 'string' ? region : '';
-        const regionEnum = ServerRegion[regionString.toUpperCase()];
+		return c.json(
+			{
+				message: "Successfully added server to server array",
+				server: server,
+			},
+			200,
+		);
+	});
 
-        const server = {
-            region: regionEnum,
-            playlist: playlist,
-            status: ServerStatus.OFFLINE,
-            maxplayers: maxPlayers,
-            players: 0,
-            customkey: customkey,
-            ip: ip,
-            port: port
-        }
+	app.delete("/api/v1/server/delete/:serverId", async (c: Context) => {
+		const serverId = c.req.param("serverId");
 
-        await db.insert(servers).values(server);
+		const deleteServer = await db.delete(servers).where(sql`${servers.id} = ${serverId}`);
 
-        return c.json({
-            message: "Successfully added server to server array",
-            server: server
-        }, 200)
-
-    });
-
-    app.delete("/api/v1/server/delete/:serverId", async (c: Context) => {
-
-        const serverId = c.req.param("serverId")
-
-        const deleteServer = await db.delete(servers).where(sql`${servers.id} = ${serverId}`)
-        if (deleteServer.count === 0) return c.json({
-            error: "Server not found"
-        }, 404)
-
-        return c.json({
-            message: `Successfully deleted server ${serverId}`,
-        }, 200)
-
-    });
-
+		return c.json(
+			{
+				message: `Successfully deleted server ${serverId}`,
+			},
+			200,
+		);
+	});
 }
 
-export default serverRoutes
+export default serverRoutes;

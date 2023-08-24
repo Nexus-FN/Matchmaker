@@ -1,27 +1,44 @@
 import { Hono } from "hono";
 import verifyApiKey from "../utilities/verifyapi.js";
+import db from "../database/connection.js";
+import { apikeys } from "../database/schema.js";
+import { randomUUID } from "crypto";
 
 function apiKeysRoutes(app: Hono) {
+	app.delete("/api/v1/apikeys/delete/:apikey", async (c) => {
+		const apiKey = c.req.param("apikey");
 
-    app.delete('/api/v1/apikeys/delete/:apikey', async (c) => {
+		if (!apiKey)
+			return c.json(
+				{
+					error: "Api key missing",
+				},
+				400,
+			);
+		if (!verifyApiKey(apiKey))
+			return c.json(
+				{
+					error: "Invalid api key",
+				},
+				401,
+			);
 
-        const apiKey = c.req.param("apikey")
+		c.json({ success: true }, 200);
+	});
 
-        if (!apiKey) return c.json({
-            error: "Api key missing"
-        }, 400)
-        if (!verifyApiKey(apiKey)) return c.json({
-            error: "Invalid api key"
-        }, 401)
+	app.put("/api/v1/apikeys/create", async (c) => {
+		const apiKey = randomUUID();
 
-        //apiKeys.splice(apiKeys.indexOf(apiKey), 1)
+		await db.insert(apikeys).values({ apikey: apiKey });
 
-        c.json({
-            success: true
-        }, 200)
-
-    });
-
+		return c.json(
+			{
+				message: "Successfully added api key to api key array",
+				apikey: apiKey,
+			},
+			200,
+		);
+	});
 }
 
-export default apiKeysRoutes
+export default apiKeysRoutes;

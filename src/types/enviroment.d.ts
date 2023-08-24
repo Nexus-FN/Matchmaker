@@ -3,7 +3,7 @@ export { };
 declare global {
     namespace NodeJS {
         interface ProcessEnv {
-            DB_URI: string;
+            DATABASE_URL: string;
             RABBITMQ_URI: string;
             MOMENTUM_INSTANCE_URL: string;
             MM_PORT: number;
