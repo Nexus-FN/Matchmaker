@@ -20,7 +20,7 @@
     "dirname-filename-esm": "^1.1.1",
     "dotenv": "^16.3.1",
     "drizzle-orm": "^0.27.2",
-    "hono": "^3.3.0",
+    "hono": "^4.5.8",
     "mysql2": "^3.5.2",
     "pg": "^8.11.1",
     "postgres": "^3.3.5",
